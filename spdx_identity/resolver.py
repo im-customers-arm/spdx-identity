@@ -29,7 +29,6 @@ class IdentityResolver:
 
     def __init__(self, purl_normalizer: PURLNormalizer | None = None) -> None:
         self._purl = purl_normalizer or PURLNormalizer()
-        self.logger = logging.getLogger(__name__)
 
     # ------------------------------------------------------------------
     # Identity key computation
@@ -110,7 +109,7 @@ class IdentityResolver:
             parts.append(f"/{components['namespace']}")
         parts.append(f"/{components['name']}")
         if components.get("subpath"):
-            parts.append(f"/{components['subpath']}")
+            parts.append(f"#{components['subpath']}")
         return "".join(parts)
 
     def _strip_cpe_version(self, cpe: str) -> str:
@@ -260,7 +259,7 @@ class IdentityResolver:
 
         ratio = differing / len(comparable)
         if ratio > VALIDATION_THRESHOLD:
-            self.logger.debug(
+            logger.debug(
                 "Rejected match: %.0f%% of %d properties differ (threshold %.0f%%)",
                 ratio * 100,
                 len(comparable),

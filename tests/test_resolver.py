@@ -206,6 +206,14 @@ class TestTier1PermanentId:
         # Should use PURL, not CPE
         assert key.startswith("perm::pkg:")
 
+    def test_scoped_npm_packages_produce_distinct_keys(self, resolver: IdentityResolver):
+        """Different @-scoped npm packages must NOT collide on identity key."""
+        key1, _ = resolver.compute_identity_key({"packageUrl": "pkg:npm/@types/node@18.0.0"})
+        key2, _ = resolver.compute_identity_key({"packageUrl": "pkg:npm/@babel/core@7.12.0"})
+        assert key1 != key2
+        assert "types" in key1 or "node" in key1
+        assert "babel" in key2 or "core" in key2
+
     def test_ext_id_priority_purl_before_cpe(self, resolver: IdentityResolver):
         """Within externalIdentifier, packageUrl takes priority over cpe23."""
         elem = {
@@ -737,6 +745,15 @@ class TestResolveSbom:
     def test_resolve_sbom_empty(self):
         result = resolve_sbom([])
         assert result == {}
+
+    def test_resolve_sbom_skips_elements_without_spdx_id(self):
+        """Elements without spdxId should be skipped, not raise KeyError."""
+        result = resolve_sbom([
+            {"spdxId": "SPDXRef-A", "type": "software_Package", "name": "a"},
+            {"type": "software_Package", "name": "no-id"},  # missing spdxId
+        ])
+        assert len(result) == 1
+        assert "SPDXRef-A" in result
 
 
 # ======================================================================

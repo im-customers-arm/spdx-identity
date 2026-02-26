@@ -15,6 +15,72 @@ class PURLNormalizer:
         """Initialize the PURL normalizer."""
         self.logger = logging.getLogger(__name__)
 
+    def _parse_purl(self, purl: str) -> dict[str, Any] | None:
+        """Parse a PURL into its components.
+
+        Follows the PURL spec grammar:
+        ``pkg:type/namespace/name@version?qualifiers#subpath``
+
+        Returns:
+            Dictionary with parsed components, or None on invalid input.
+        """
+        if not purl or not isinstance(purl, str):
+            return None
+        if not purl.startswith("pkg:"):
+            return None
+
+        purl_content = purl[4:]
+
+        # Step 1: Strip #subpath from the end
+        subpath = ""
+        if "#" in purl_content:
+            purl_content, subpath = purl_content.rsplit("#", 1)
+
+        # Step 2: Strip ?qualifiers from the end
+        qualifiers_str = ""
+        if "?" in purl_content:
+            purl_content, qualifiers_str = purl_content.rsplit("?", 1)
+
+        # Step 3: Parse qualifiers
+        qualifiers: dict[str, str] = {}
+        if qualifiers_str:
+            for qualifier in qualifiers_str.split("&"):
+                if "=" in qualifier:
+                    key, value = qualifier.split("=", 1)
+                    qualifiers[key] = value
+
+        # Step 4: Split into path segments
+        parts = purl_content.split("/")
+        if len(parts) < 2:
+            return None
+
+        package_type = parts[0]
+
+        # Step 5: Extract @version from the last segment only
+        last_segment = parts[-1]
+        version = ""
+        if "@" in last_segment:
+            last_segment, version = last_segment.rsplit("@", 1)
+            parts[-1] = last_segment
+
+        # Step 6: Parse namespace and name
+        if len(parts) == 2:
+            namespace = ""
+            name = parts[1]
+        else:
+            namespace = "/".join(parts[1:-1])
+            name = parts[-1]
+
+        return {
+            "scheme": "pkg",
+            "type": package_type,
+            "namespace": namespace,
+            "name": name,
+            "version": version,
+            "qualifiers": qualifiers,
+            "subpath": subpath,
+        }
+
     def normalize_purl(self, purl: str) -> str:
         """Normalize a PURL for comparison.
 
@@ -28,62 +94,25 @@ class PURLNormalizer:
             return purl
 
         try:
-            # Parse PURL manually: pkg:type/namespace/name@version?qualifiers#subpath
-            if not purl.startswith("pkg:"):
-                self.logger.warning(f"Invalid PURL: {purl}, expected to start with 'pkg:'")
+            components = self._parse_purl(purl)
+            if components is None:
+                self.logger.warning(f"Invalid PURL: {purl}")
                 return purl
 
-            # Remove the pkg: prefix
-            purl_content = purl[4:]
+            package_type = components["type"].lower()
+            namespace = components["namespace"].lower()
+            name = components["name"].lower()
+            version = components["version"]
+            qualifiers = components["qualifiers"]
+            subpath = components["subpath"]
 
-            # Split by @ to separate version and qualifiers
-            if "@" in purl_content:
-                base_part, version_part = purl_content.split("@", 1)
-            else:
-                base_part = purl_content
-                version_part = ""
-
-            # Split version and qualifiers
-            if "?" in version_part:
-                version, qualifiers_part = version_part.split("?", 1)
-            else:
-                version = version_part
-                qualifiers_part = ""
-
-            # Parse qualifiers
-            qualifiers: dict[str, str] = {}
-            if qualifiers_part:
-                for qualifier in qualifiers_part.split("&"):
-                    if "=" in qualifier:
-                        key, value = qualifier.split("=", 1)
-                        qualifiers[key] = value
-
-            # Parse the base part (type/namespace/name)
-            parts = base_part.split("/")
-            if len(parts) < 2:
-                self.logger.warning(f"Invalid PURL format: {purl}")
-                return purl
-
-            package_type = parts[0].lower()
-            # For PURLs like pkg:npm/example, the second part is the name, not namespace
-            if len(parts) == 2:
-                namespace = ""
-                name = parts[1].lower()
-                subpath = ""
-            else:
-                namespace = parts[1].lower() if len(parts) > 1 else ""
-                name = parts[2].lower() if len(parts) > 2 else ""
-                subpath = "/".join(parts[3:]) if len(parts) > 3 else ""
-
-            # Reconstruct normalized PURL
+            # Reconstruct normalized PURL in spec order
             normalized_parts = ["pkg:", package_type]
 
             if namespace:
                 normalized_parts.append(f"/{namespace}")
             if name:
                 normalized_parts.append(f"/{name}")
-            if subpath:
-                normalized_parts.append(f"/{subpath}")
 
             if version:
                 normalized_parts.append(f"@{version}")
@@ -93,6 +122,9 @@ class PURLNormalizer:
                 for key in sorted(qualifiers.keys()):
                     sorted_qualifiers.append(f"{key}={qualifiers[key]}")
                 normalized_parts.append(f"?{'&'.join(sorted_qualifiers)}")
+
+            if subpath:
+                normalized_parts.append(f"#{subpath}")
 
             normalized = "".join(normalized_parts)
 
@@ -128,69 +160,13 @@ class PURLNormalizer:
             purl: Package URL string
 
         Returns:
-            Dictionary with PURL components
+            Dictionary with PURL components (original case preserved)
         """
-        if not purl or not isinstance(purl, str):
-            return {}
-
         try:
-            # Parse PURL manually: pkg:type/namespace/name@version?qualifiers#subpath
-            if not purl.startswith("pkg:"):
+            components = self._parse_purl(purl)
+            if components is None:
                 return {}
-
-            # Remove the pkg: prefix
-            purl_content = purl[4:]
-
-            # Split by @ to separate version and qualifiers
-            if "@" in purl_content:
-                base_part, version_part = purl_content.split("@", 1)
-            else:
-                base_part = purl_content
-                version_part = ""
-
-            # Split version and qualifiers
-            if "?" in version_part:
-                version, qualifiers_part = version_part.split("?", 1)
-            else:
-                version = version_part
-                qualifiers_part = ""
-
-            # Parse qualifiers
-            qualifiers: dict[str, str] = {}
-            if qualifiers_part:
-                for qualifier in qualifiers_part.split("&"):
-                    if "=" in qualifier:
-                        key, value = qualifier.split("=", 1)
-                        qualifiers[key] = value
-
-            # Parse the base part (type/namespace/name)
-            parts = base_part.split("/")
-            if len(parts) < 2:
-                return {}
-
-            package_type = parts[0]
-            # For PURLs like pkg:npm/example, the second part is the name, not namespace
-            if len(parts) == 2:
-                namespace = ""
-                name = parts[1]
-                subpath = ""
-            else:
-                namespace = parts[1] if len(parts) > 1 else ""
-                name = parts[2] if len(parts) > 2 else ""
-                subpath = "/".join(parts[3:]) if len(parts) > 3 else ""
-
-            components: dict[str, Any] = {
-                "scheme": "pkg",
-                "type": package_type,
-                "namespace": namespace,
-                "name": name,
-                "version": version,
-                "qualifiers": qualifiers,
-                "subpath": subpath,
-            }
-
             return components
-
         except Exception as e:
             self.logger.warning(f"Failed to extract PURL components from '{purl}': {e}")
             return {}

@@ -34,11 +34,13 @@ class TestNormalizePurl:
         assert "lodash" in result
 
     def test_normalize_purl_with_namespace(self, normalizer: PURLNormalizer) -> None:
-        """Test normalizing PURL with namespace."""
+        """Test normalizing PURL with scoped namespace."""
         purl = "pkg:npm/@types/node"
         result = normalizer.normalize_purl(purl)
         assert result is not None
         assert "npm" in result.lower()
+        assert "@types" in result
+        assert "node" in result
 
     def test_normalize_purl_with_version(self, normalizer: PURLNormalizer) -> None:
         """Test normalizing PURL with version."""
@@ -164,8 +166,17 @@ class TestExtractPurlComponents:
         assert components["type"] == "npm"
         assert components["name"] == "lodash"
 
+    def test_extract_purl_with_scoped_namespace(self, normalizer: PURLNormalizer) -> None:
+        """Test extracting components from PURL with @-scoped namespace."""
+        purl = "pkg:npm/@babel/core"
+        components = normalizer.extract_purl_components(purl)
+        assert components["scheme"] == "pkg"
+        assert components["type"] == "npm"
+        assert components["namespace"] == "@babel"
+        assert components["name"] == "core"
+
     def test_extract_purl_with_namespace(self, normalizer: PURLNormalizer) -> None:
-        """Test extracting components from PURL with namespace."""
+        """Test extracting components from PURL with non-scoped namespace."""
         purl = "pkg:npm/babel/core"
         components = normalizer.extract_purl_components(purl)
         assert components["scheme"] == "pkg"
@@ -186,9 +197,11 @@ class TestExtractPurlComponents:
         assert components["qualifiers"] == {"arch": "arm64", "os": "linux"}
 
     def test_extract_purl_with_subpath(self, normalizer: PURLNormalizer) -> None:
-        """Test extracting components from PURL with subpath."""
-        purl = "pkg:maven/org/example/project/src"
+        """Test extracting components from PURL with #-delimited subpath."""
+        purl = "pkg:maven/org/example#project/src"
         components = normalizer.extract_purl_components(purl)
+        assert components["namespace"] == "org"
+        assert components["name"] == "example"
         assert components["subpath"] == "project/src"
 
     def test_extract_purl_without_version(self, normalizer: PURLNormalizer) -> None:
@@ -231,15 +244,61 @@ class TestExtractPurlComponents:
         assert result == {}
 
     def test_extract_purl_all_components(self, normalizer: PURLNormalizer) -> None:
-        """Test extracting all components from full PURL."""
+        """Test extracting all components from full PURL with multi-segment namespace."""
         purl = "pkg:maven/org/apache/commons@1.0?type=jar"
         components = normalizer.extract_purl_components(purl)
         assert components["scheme"] == "pkg"
         assert components["type"] == "maven"
-        assert components["namespace"] == "org"
-        assert components["name"] == "apache"
+        assert components["namespace"] == "org/apache"
+        assert components["name"] == "commons"
         assert components["version"] == "1.0"
         assert components["qualifiers"] == {"type": "jar"}
+
+
+class TestScopedPackages:
+    """Tests for scoped npm packages (@scope/name format)."""
+
+    @pytest.fixture
+    def normalizer(self) -> PURLNormalizer:
+        return PURLNormalizer()
+
+    def test_extract_scoped_npm_with_version(self, normalizer: PURLNormalizer) -> None:
+        """pkg:npm/@types/node@18.0.0 must parse correctly."""
+        c = normalizer.extract_purl_components("pkg:npm/@types/node@18.0.0")
+        assert c["type"] == "npm"
+        assert c["namespace"] == "@types"
+        assert c["name"] == "node"
+        assert c["version"] == "18.0.0"
+
+    def test_extract_scoped_npm_without_version(self, normalizer: PURLNormalizer) -> None:
+        """pkg:npm/@types/node must parse correctly."""
+        c = normalizer.extract_purl_components("pkg:npm/@types/node")
+        assert c["type"] == "npm"
+        assert c["namespace"] == "@types"
+        assert c["name"] == "node"
+        assert c["version"] == ""
+
+    def test_extract_scoped_npm_with_qualifiers(self, normalizer: PURLNormalizer) -> None:
+        """pkg:npm/@scope/name@1.0?foo=bar must parse correctly."""
+        c = normalizer.extract_purl_components("pkg:npm/@scope/name@1.0?foo=bar")
+        assert c["type"] == "npm"
+        assert c["namespace"] == "@scope"
+        assert c["name"] == "name"
+        assert c["version"] == "1.0"
+        assert c["qualifiers"] == {"foo": "bar"}
+
+    def test_normalize_scoped_npm_with_version(self, normalizer: PURLNormalizer) -> None:
+        """Scoped PURL normalization must preserve scope."""
+        result = normalizer.normalize_purl("pkg:npm/@types/node@18.0.0")
+        assert "@types" in result
+        assert "node" in result
+        assert "@18.0.0" in result
+
+    def test_scoped_packages_do_not_collide(self, normalizer: PURLNormalizer) -> None:
+        """Different scoped packages MUST produce different normalized forms."""
+        r1 = normalizer.normalize_purl("pkg:npm/@types/node@18.0.0")
+        r2 = normalizer.normalize_purl("pkg:npm/@babel/core@7.12.0")
+        assert r1 != r2
 
 
 class TestPURLEdgeCases:
