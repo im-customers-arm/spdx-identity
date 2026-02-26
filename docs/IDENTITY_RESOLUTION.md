@@ -17,7 +17,7 @@ The identity resolution algorithm solves this by matching elements on **what the
 
 `spdx_identity` provides a standalone implementation of the tiered identity resolution algorithm. The public API consists of:
 
-- **`IdentityResolver`** -- Resolves a single SPDX element to a stable `(identity_key, tier)` tuple.
+- **`IdentityResolver`** -- Resolves a single SPDX element to a stable `(identity_key, tier)` tuple. Constructor accepts optional `purl_normalizer` for dependency injection.
 - **`resolve_sbom()`** -- Convenience function to resolve all elements in a parsed SBOM at once.
 - **`PURLNormalizer`** -- Normalizes Package URL (PURL) identifiers for comparison.
 - **`REFERENCE_FIELDS`** -- Frozen set of property names that contain spdxId references and must be excluded from content hashing.

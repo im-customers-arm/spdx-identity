@@ -120,9 +120,12 @@ new = {"type": "software_Package", "name": "foo", "packageVersion": "1.1"}
 # Returns True -- only version differs (well under 70% threshold)
 resolver.validate_match(old, new)
 
-# Returns False if >70% of comparable properties differ
-unrelated = {"type": "software_Package", "name": "foo", "supplier": "X",
-             "description": "A", "downloadLocation": "http://a.com"}
+# Returns False -- >70% of comparable properties differ (8 of 10 props = 80%)
+unrelated = {
+    "type": "software_Package", "name": "foo",
+    "supplier": "X", "description": "A", "downloadLocation": "http://a.com",
+    "homepage": "http://b.com", "summary": "x", "sourceInfo": "y", "comment": "z",
+}
 resolver.validate_match(old, unrelated)
 ```
 
@@ -148,8 +151,9 @@ key = resolver.compute_relationship_identity_key(rel)
 
 ### `IdentityResolver`
 
-| Method | Description |
-|--------|-------------|
+| Constructor / Method | Description |
+|----------------------|-------------|
+| `IdentityResolver(purl_normalizer=None)` | Optional `PURLNormalizer` for dependency injection (default: creates one internally) |
 | `compute_identity_key(element)` | Returns `(identity_key, tier)` for an SPDX element dict |
 | `validate_match(old_element, new_element)` | Returns `False` if >70% of non-reference properties differ |
 | `compute_relationship_identity_key(relationship)` | Returns a deterministic identity key for a relationship dict |
