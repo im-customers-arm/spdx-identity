@@ -58,9 +58,10 @@ class IdentityResolver:
         # Direct packageUrl property (highest priority)
         purl = element.get("packageUrl") or element.get("software_packageUrl")
         if purl and isinstance(purl, str):
-            stripped = self._strip_purl_version(purl)
-            normalized = self._purl.normalize_purl(stripped)
-            return f"perm::{normalized}"
+            if self._purl.extract_purl_components(purl):
+                stripped = self._strip_purl_version(purl)
+                normalized = self._purl.normalize_purl(stripped)
+                return f"perm::{normalized}"
 
         # External identifiers
         ext_ids = element.get("externalIdentifier", [])
@@ -76,13 +77,17 @@ class IdentityResolver:
                 if not identifier or not isinstance(identifier, str):
                     continue
                 if eid_type == id_type:
-                    return self._normalize_permanent_id(id_type, identifier)
+                    normalized = self._normalize_permanent_id(id_type, identifier)
+                    if normalized is not None:
+                        return normalized
 
         return None
 
-    def _normalize_permanent_id(self, id_type: str, identifier: str) -> str:
+    def _normalize_permanent_id(self, id_type: str, identifier: str) -> str | None:
         """Normalize a permanent identifier by type."""
         if id_type == "packageUrl":
+            if not self._purl.extract_purl_components(identifier):
+                return None
             stripped = self._strip_purl_version(identifier)
             return f"perm::{self._purl.normalize_purl(stripped)}"
         if id_type in ("cpe23", "cpe22"):
@@ -128,7 +133,7 @@ class IdentityResolver:
             # CPE 2.2 format: cpe:/part:vendor:product:version
             parts = cpe_lower.split(":")
             if len(parts) >= 4:
-                return ":".join(parts[:3])
+                return ":".join(parts[:4])
             return cpe_lower
         return cpe_lower
 
@@ -171,6 +176,8 @@ class IdentityResolver:
         if elem_type == "Annotation":
             ann_type = element.get("annotationType", "")
             statement = element.get("statement", "")
+            if not ann_type and not statement:
+                return None  # Fall to Tier 3
             stmt_hash = self._short_hash(statement)
             return f"Annotation::{ann_type}::{stmt_hash}"
 
@@ -189,6 +196,8 @@ class IdentityResolver:
         # --- build_Build: type::buildType::buildId ---
         if elem_type == "build_Build":
             build_type = element.get("buildType", "")
+            if not build_type:
+                return None  # Fall to Tier 3
             build_id = element.get("buildId")
             key_parts = [f"build_Build::{build_type}"]
             if build_id:
@@ -233,7 +242,7 @@ class IdentityResolver:
             for k, v in element.items()
             if k not in REFERENCE_FIELDS and k not in ("@type", "@context")
         }
-        digest = self._short_hash(json.dumps(filtered, sort_keys=True, default=str))
+        digest = self._short_hash(json.dumps(filtered, sort_keys=True, default=self._json_default))
         return f"hash::{elem_type}::{digest}"
 
     # ------------------------------------------------------------------
@@ -286,7 +295,7 @@ class IdentityResolver:
 
         # Normalize 'to' for deterministic key
         if isinstance(to_field, list):
-            to_normalized = "|".join(sorted(str(t) for t in to_field))
+            to_normalized = "[" + "|".join(sorted(str(t) for t in to_field)) + "]"
         else:
             to_normalized = str(to_field)
 
@@ -300,3 +309,10 @@ class IdentityResolver:
     def _short_hash(data: str) -> str:
         """SHA-256 truncated to 16 hex characters."""
         return hashlib.sha256(data.encode()).hexdigest()[:16]
+
+    @staticmethod
+    def _json_default(obj: object) -> object:
+        """Deterministic JSON default for non-native types."""
+        if isinstance(obj, (set, frozenset)):
+            return sorted(str(item) for item in obj)
+        return str(obj)

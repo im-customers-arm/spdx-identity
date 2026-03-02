@@ -146,6 +146,45 @@ class TestTier1PermanentId:
         # CPE 2.2: version component stripped
         assert "7.88.0" not in key
         assert "cpe:/a:haxx" in key
+        assert "curl" in key  # Product must be preserved
+
+    def test_cpe22_different_products_same_vendor_distinct_keys(self, resolver: IdentityResolver):
+        """Two CPE 2.2 entries from the same vendor with different products must NOT collide."""
+        elem_curl = {
+            "type": "software_Package",
+            "name": "curl",
+            "externalIdentifier": [
+                {"externalIdentifierType": "cpe22", "identifier": "cpe:/a:haxx:curl:7.88.0"}
+            ],
+        }
+        elem_libcurl = {
+            "type": "software_Package",
+            "name": "libcurl",
+            "externalIdentifier": [
+                {"externalIdentifierType": "cpe22", "identifier": "cpe:/a:haxx:libcurl:7.88.0"}
+            ],
+        }
+        key_curl, _ = resolver.compute_identity_key(elem_curl)
+        key_libcurl, _ = resolver.compute_identity_key(elem_libcurl)
+        assert key_curl != key_libcurl
+
+    def test_cpe22_different_versions_same_key(self, resolver: IdentityResolver):
+        """CPE 2.2 entries for same product with different versions must produce same key."""
+        elem_v1 = {
+            "type": "software_Package",
+            "name": "curl",
+            "externalIdentifier": [
+                {"externalIdentifierType": "cpe22", "identifier": "cpe:/a:haxx:curl:7.88.0"}
+            ],
+        }
+        elem_v2 = {
+            "type": "software_Package",
+            "name": "curl",
+            "externalIdentifier": [
+                {"externalIdentifierType": "cpe22", "identifier": "cpe:/a:haxx:curl:8.0.0"}
+            ],
+        }
+        assert resolver.compute_identity_key(elem_v1)[0] == resolver.compute_identity_key(elem_v2)[0]
 
     def test_cve_identity(self, resolver: IdentityResolver):
         elem = {
@@ -232,6 +271,53 @@ class TestTier1PermanentId:
         }
         key, _ = resolver.compute_identity_key(elem)
         assert key.startswith("perm::pkg:")
+
+    def test_invalid_purl_in_package_url_falls_to_tier2(self, resolver: IdentityResolver):
+        """An invalid PURL in packageUrl must not be accepted as Tier 1."""
+        elem = {
+            "type": "software_Package",
+            "name": "test-pkg",
+            "packageUrl": "not-a-purl",
+        }
+        key, tier = resolver.compute_identity_key(elem)
+        assert tier == 2
+        assert key == "software_Package::test-pkg"
+
+    def test_invalid_purl_in_external_identifier_falls_through(self, resolver: IdentityResolver):
+        """An invalid PURL in externalIdentifier packageUrl must not be accepted as Tier 1."""
+        elem = {
+            "type": "software_Package",
+            "name": "test-pkg",
+            "externalIdentifier": [
+                {
+                    "externalIdentifierType": "packageUrl",
+                    "identifier": "http://example.com/not-a-purl",
+                }
+            ],
+        }
+        key, tier = resolver.compute_identity_key(elem)
+        assert tier == 2
+        assert key == "software_Package::test-pkg"
+
+    def test_invalid_purl_with_valid_cpe_uses_cpe(self, resolver: IdentityResolver):
+        """When packageUrl is invalid but CPE is valid, CPE should be used."""
+        elem = {
+            "type": "software_Package",
+            "name": "test-pkg",
+            "externalIdentifier": [
+                {
+                    "externalIdentifierType": "packageUrl",
+                    "identifier": "garbage",
+                },
+                {
+                    "externalIdentifierType": "cpe23",
+                    "identifier": "cpe:2.3:a:vendor:product:1.0:*:*:*:*:*:*:*",
+                },
+            ],
+        }
+        key, tier = resolver.compute_identity_key(elem)
+        assert tier == 1
+        assert "cpe:2.3" in key
 
 
 # ======================================================================
@@ -437,6 +523,31 @@ class TestTier2CompositeKey:
         e2 = {"type": "software_Package", "name": "flask", "packageVersion": "3.0"}
         assert resolver.compute_identity_key(e1) == resolver.compute_identity_key(e2)
 
+    def test_empty_annotation_falls_to_tier3(self, resolver: IdentityResolver):
+        """Annotation with no annotationType and no statement should fall to Tier 3."""
+        elem = {"type": "Annotation"}
+        _, tier = resolver.compute_identity_key(elem)
+        assert tier == 3
+
+    def test_annotation_with_only_type_stays_tier2(self, resolver: IdentityResolver):
+        """Annotation with annotationType but empty statement stays at Tier 2."""
+        elem = {"type": "Annotation", "annotationType": "REVIEW"}
+        key, tier = resolver.compute_identity_key(elem)
+        assert tier == 2
+        assert key.startswith("Annotation::REVIEW::")
+
+    def test_empty_build_falls_to_tier3(self, resolver: IdentityResolver):
+        """build_Build with empty buildType should fall to Tier 3."""
+        elem = {"type": "build_Build", "buildType": ""}
+        _, tier = resolver.compute_identity_key(elem)
+        assert tier == 3
+
+    def test_build_without_build_type_falls_to_tier3(self, resolver: IdentityResolver):
+        """build_Build missing buildType entirely should fall to Tier 3."""
+        elem = {"type": "build_Build"}
+        _, tier = resolver.compute_identity_key(elem)
+        assert tier == 3
+
 
 # ======================================================================
 # Tier 3 -- Content hash
@@ -502,6 +613,22 @@ class TestTier3ContentHash:
         key, tier = resolver.compute_identity_key(elem)
         assert tier == 3
         assert key.startswith("hash::::")
+
+    def test_content_hash_deterministic_for_sets(self, resolver: IdentityResolver):
+        """Elements containing set values must produce deterministic hashes."""
+        elem1 = {
+            "type": "expandedlicensing_CustomLicense",
+            "licenseText": "License A",
+            "tags": frozenset(["z", "a", "m"]),
+        }
+        elem2 = {
+            "type": "expandedlicensing_CustomLicense",
+            "licenseText": "License A",
+            "tags": frozenset(["m", "z", "a"]),
+        }
+        k1, _ = resolver.compute_identity_key(elem1)
+        k2, _ = resolver.compute_identity_key(elem2)
+        assert k1 == k2
 
 
 # ======================================================================
@@ -650,7 +777,7 @@ class TestRelationshipIdentityKey:
         }
         key = resolver.compute_relationship_identity_key(rel)
         # 'to' list should be sorted
-        assert "SPDXRef-B|SPDXRef-C" in key
+        assert "[SPDXRef-B|SPDXRef-C]" in key
 
     def test_relationship_defaults(self, resolver: IdentityResolver):
         """Missing fields get empty string defaults."""
@@ -688,6 +815,24 @@ class TestRelationshipIdentityKey:
             "relationshipType": "CONTAINS",
         }
         assert resolver.compute_relationship_identity_key(rel1) != resolver.compute_relationship_identity_key(rel2)
+
+    def test_relationship_to_list_scalar_no_collision(self, resolver: IdentityResolver):
+        """Scalar to='B|C' and list to=['B','C'] must produce different keys."""
+        rel_scalar = {
+            "type": "Relationship",
+            "from": "SPDXRef-A",
+            "to": "B|C",
+            "relationshipType": "CONTAINS",
+        }
+        rel_list = {
+            "type": "Relationship",
+            "from": "SPDXRef-A",
+            "to": ["B", "C"],
+            "relationshipType": "CONTAINS",
+        }
+        key_scalar = resolver.compute_relationship_identity_key(rel_scalar)
+        key_list = resolver.compute_relationship_identity_key(rel_list)
+        assert key_scalar != key_list
 
 
 # ======================================================================

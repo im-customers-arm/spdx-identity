@@ -81,7 +81,7 @@ class PURLNormalizer:
             "subpath": subpath,
         }
 
-    def normalize_purl(self, purl: str) -> str:
+    def normalize_purl(self, purl: str | None) -> str | None:
         """Normalize a PURL for comparison.
 
         Args:
@@ -90,7 +90,7 @@ class PURLNormalizer:
         Returns:
             Normalized PURL string
         """
-        if not purl or not isinstance(purl, str):
+        if not purl:
             return purl
 
         try:

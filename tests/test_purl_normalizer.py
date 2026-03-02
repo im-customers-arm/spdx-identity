@@ -80,11 +80,6 @@ class TestNormalizePurl:
         result = normalizer.normalize_purl(None)
         assert result is None
 
-    def test_normalize_non_string(self, normalizer: PURLNormalizer) -> None:
-        """Test normalizing non-string returns original value."""
-        result = normalizer.normalize_purl(123)
-        assert result == 123
-
     def test_normalize_invalid_purl_no_pkg(self, normalizer: PURLNormalizer) -> None:
         """Test normalizing PURL without pkg: prefix."""
         purl = "npm/lodash"  # Missing pkg:
