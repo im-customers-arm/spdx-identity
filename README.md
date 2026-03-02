@@ -144,7 +144,7 @@ rel = {
 }
 
 key = resolver.compute_relationship_identity_key(rel)
-# "rel::Relationship::pkg:pypi/flask::DEPENDS_ON::pkg:pypi/jinja2|pkg:pypi/werkzeug::"
+# "rel::Relationship::pkg:pypi/flask::DEPENDS_ON::[pkg:pypi/jinja2|pkg:pypi/werkzeug]::"
 ```
 
 ## API Reference
@@ -168,7 +168,7 @@ key = resolver.compute_relationship_identity_key(rel)
 
 ### `resolve_sbom(elements)`
 
-Convenience function that creates an `IdentityResolver` and resolves all elements in a list. Returns `{spdx_id: (identity_key, tier)}`.
+Convenience function that creates an `IdentityResolver` and resolves all elements in a list. Returns `{spdx_id: (identity_key, tier)}` and skips entries that do not contain `spdxId`.
 
 ### `REFERENCE_FIELDS`
 

@@ -18,7 +18,7 @@ The identity resolution algorithm solves this by matching elements on **what the
 `spdx_identity` provides a standalone implementation of the tiered identity resolution algorithm. The public API consists of:
 
 - **`IdentityResolver`** -- Resolves a single SPDX element to a stable `(identity_key, tier)` tuple. Constructor accepts optional `purl_normalizer` for dependency injection.
-- **`resolve_sbom()`** -- Convenience function to resolve all elements in a parsed SBOM at once.
+- **`resolve_sbom()`** -- Convenience function to resolve all elements in a parsed SBOM at once (elements without `spdxId` are skipped).
 - **`PURLNormalizer`** -- Normalizes Package URL (PURL) identifiers for comparison.
 - **`REFERENCE_FIELDS`** -- Frozen set of property names that contain spdxId references and must be excluded from content hashing.
 
@@ -50,7 +50,7 @@ Each element is assigned an identity key from the highest available tier:
                            +----------+  +----------+
 ```
 
-**Key principle:** Version is always excluded from identity keys. This allows detecting version upgrades as property modifications rather than add/remove pairs.
+**Key principle:** Version is excluded from Tier 1 and Tier 2 identity keys. Tier 3 hashes the full non-reference payload, so version fields are included there if present.
 
 ### Tier 1: Permanent Identifiers
 
@@ -59,12 +59,12 @@ Permanent identifiers are external, cross-SBOM-stable identifiers. They are chec
 | Source | Property Path | Normalization | Version Stripping |
 |--------|--------------|---------------|-------------------|
 | Package URL (property) | `packageUrl` or `software_packageUrl` | `PURLNormalizer.normalize_purl()` | Strip `@version` and all qualifiers |
-| Package URL (external ID) | `externalIdentifier[type=packageUrl].identifier` | Same | Same |
-| CPE 2.3 | `externalIdentifier[type=cpe23].identifier` | Lowercase | Replace version + update fields with `*` |
-| CPE 2.2 | `externalIdentifier[type=cpe22].identifier` | Lowercase | Strip version component |
-| CVE | `externalIdentifier[type=cve].identifier` | Uppercase | N/A (version-less by nature) |
-| SWHID | `externalIdentifier[type=swhid].identifier` | As-is | N/A (content-addressable) |
-| gitoid | `externalIdentifier[type=gitoid].identifier` | As-is | N/A (content-addressable) |
+| Package URL (external ID) | `externalIdentifier[externalIdentifierType=packageUrl].identifier` | Same | Same |
+| CPE 2.3 | `externalIdentifier[externalIdentifierType=cpe23].identifier` | Lowercase | Replace version + update fields with `*` |
+| CPE 2.2 | `externalIdentifier[externalIdentifierType=cpe22].identifier` | Lowercase | Strip version component |
+| CVE | `externalIdentifier[externalIdentifierType=cve].identifier` | Uppercase | N/A (version-less by nature) |
+| SWHID | `externalIdentifier[externalIdentifierType=swhid].identifier` | As-is | N/A (content-addressable) |
+| gitoid | `externalIdentifier[externalIdentifierType=gitoid].identifier` | As-is | N/A (content-addressable) |
 
 **Key format:** `perm::<normalized_id>` (e.g., `perm::pkg:pypi/pyyaml`)
 
@@ -145,7 +145,7 @@ Type-specific keys built from identifying properties (version always excluded).
 For elements without permanent identifiers or usable composite key properties:
 
 1. Collect all non-reference, non-structural properties from the element
-2. Serialize deterministically: `json.dumps(filtered_props, sort_keys=True, default=str)`
+2. Serialize deterministically: `json.dumps(filtered_props, sort_keys=True, default=_json_default)` where sets/frozensets are converted to sorted string lists
 3. Hash with SHA-256, truncated to 16 hex characters
 
 **Key format:** `hash::<type>::<hex_digest>`
@@ -162,7 +162,7 @@ These are available as the `REFERENCE_FIELDS` constant.
 
 ## Post-Match Validation
 
-After pairing elements by identity key, a validation step rejects false positives:
+`spdx_identity` exposes `IdentityResolver.validate_match(old_element, new_element)` for callers to reject false positives after key-based pairing. This check is not run automatically by `compute_identity_key()` or `resolve_sbom()`.
 
 1. Compute the union of non-reference property names present in either element
 2. Exclude `@type` and `@context` (structural, not semantic)
@@ -197,10 +197,10 @@ rel::{type}::{from}::{relationshipType}::{to}::{scope}
 - **`type`** -- The JSON-LD type of the relationship (e.g., `Relationship`, `LifecycleScopedRelationship`).
 - **`from`** -- The source element identifier.
 - **`relationshipType`** -- The SPDX relationship type (e.g., `DEPENDS_ON`, `CONTAINS`).
-- **`to`** -- A sorted, pipe-separated list of target element identifiers.
+- **`to`** -- If scalar, used as-is. If list, values are sorted and encoded as bracketed pipe-delimited form: `[a|b|c]`.
 - **`scope`** -- The lifecycle scope (if present, otherwise empty).
 
-The `to` list is **sorted** for determinism: two relationships with the same targets in different orders produce the same identity key.
+The list form of `to` is **sorted** for determinism: two relationships with the same targets in different orders produce the same identity key.
 
 ## Worked Examples
 
